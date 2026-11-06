@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MultiTool French</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>MultiTool <span>French</span></h1>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" role="tab" aria-selected="true" data-tab="translate">Переводчик</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="transcribe">Расшифровка</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-translate" class="panel">
+      <div class="toolbar">
+        <div class="direction" role="radiogroup" aria-label="Направление перевода">
+          <button class="dir active" data-dir="auto">Авто</button>
+          <button class="dir" data-dir="fr-ru">FR → RU</button>
+          <button class="dir" data-dir="ru-fr">RU → FR</button>
+        </div>
+        <span id="detected" class="hint"></span>
+      </div>
+
+      <div class="columns">
+        <div class="box">
+          <textarea id="source" placeholder="Вставьте текст на французском или русском…" maxlength="20000"></textarea>
+          <div class="box-footer">
+            <span id="counter" class="hint">0 / 20 000</span>
+            <button id="clear" class="ghost">Очистить</button>
+          </div>
+        </div>
+        <div class="box">
+          <div id="result" class="result" aria-live="polite"></div>
+          <div class="box-footer">
+            <span class="hint">Ctrl + Enter — перевести</span>
+            <button id="copy" class="ghost" disabled>Копировать</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="translate" class="primary">Перевести</button>
+      </div>
+      <p id="error" class="error" role="alert" hidden></p>
+    </section>
+
+    <section id="tab-transcribe" class="panel" hidden>
+      <div class="soon">
+        <h2>Расшифровка аудио и видео</h2>
+        <p>Скоро здесь можно будет загрузить запись на французском и получить расшифровку с переводом на русский.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
