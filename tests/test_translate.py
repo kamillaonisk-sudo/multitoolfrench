@@ -94,7 +94,7 @@ def test_network_error_gives_clear_message():
         api_key="fake", http_options=types.HttpOptions(base_url="https://127.0.0.1:9")
     )
     try:
-        asyncio.run(t.translate("Bonjour", "fr", "ru"))
+        asyncio.run(t.translate("Bonjour", "fr", "ru", max_wait=0))
     except TranslationError as e:
         assert "Нет связи" in e.message
     else:

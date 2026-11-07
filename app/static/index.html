@@ -50,9 +50,31 @@
     </section>
 
     <section id="tab-transcribe" class="panel" hidden>
-      <div class="soon">
-        <h2>Расшифровка аудио и видео</h2>
-        <p>Скоро здесь можно будет загрузить запись на французском и получить расшифровку с переводом на русский.</p>
+      <div id="upload-view">
+        <label id="dropzone" class="dropzone">
+          <input type="file" id="file-input" accept="audio/*,video/*" hidden>
+          <strong>Перетащите аудио или видео на французском</strong>
+          <span class="hint">или нажмите, чтобы выбрать файл · mp3, m4a, wav, ogg, mp4, mov, mkv…</span>
+        </label>
+        <p class="hint center">Получите расшифровку с переводом на русский и скачаете её в TXT.</p>
+        <p id="upload-error" class="error" role="alert" hidden></p>
+      </div>
+
+      <div id="job-view" hidden>
+        <div class="job-head">
+          <div class="job-info">
+            <div id="job-file" class="job-file"></div>
+            <div id="job-stage" class="hint" aria-live="polite"></div>
+          </div>
+          <div class="job-actions">
+            <button id="download" class="primary" disabled>Скачать TXT</button>
+            <button id="new-file" class="ghost">Новый файл</button>
+          </div>
+        </div>
+        <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
+        <p id="job-note" class="hint">Вкладку можно закрыть — обработка продолжится, а результат появится здесь, когда вы вернётесь.</p>
+        <p id="job-error" class="error" role="alert" hidden></p>
+        <div id="transcript" class="transcript"></div>
       </div>
     </section>
   </main>

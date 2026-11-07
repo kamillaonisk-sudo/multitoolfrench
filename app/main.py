@@ -1,26 +1,44 @@
+import os
+import tempfile
 from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.translator import GeminiTranslator, TranslationError, detect_source
-
 load_dotenv()
 
+from app.errors import AppError  # noqa: E402
+from app.jobs import JobManager  # noqa: E402
+from app.transcribe import make_transcriber  # noqa: E402
+from app.translator import GeminiTranslator, detect_source  # noqa: E402
+
 MAX_TEXT_LENGTH = 20_000
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "2000"))
 
 app = FastAPI(title="MultiTool French")
 
 _translator = GeminiTranslator()
+_jobs = JobManager(make_transcriber, _translator)
 
 
 def get_translator() -> GeminiTranslator:
     return _translator
 
+
+def get_jobs() -> JobManager:
+    return _jobs
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(_request, exc: AppError):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+
+# ---------- Переводчик ----------
 
 class TranslateRequest(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
@@ -33,16 +51,11 @@ class TranslateResponse(BaseModel):
     target: str
 
 
-@app.exception_handler(TranslationError)
-async def translation_error_handler(_request, exc: TranslationError):
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
-
-
 @app.post("/api/translate", response_model=TranslateResponse)
 async def translate(req: TranslateRequest, translator=Depends(get_translator)):
     text = req.text.strip()
     if not text:
-        raise TranslationError("Введите текст для перевода.", status_code=400)
+        raise AppError("Введите текст для перевода.", status_code=400)
 
     if req.direction == "auto":
         source = detect_source(text)
@@ -52,6 +65,50 @@ async def translate(req: TranslateRequest, translator=Depends(get_translator)):
 
     translation = await translator.translate(text, source, target)
     return TranslateResponse(translation=translation, source=source, target=target)
+
+
+# ---------- Расшифровка ----------
+
+@app.post("/api/transcribe")
+async def transcribe(file: UploadFile, jobs: JobManager = Depends(get_jobs)):
+    # Проверяем ключи до загрузки большого файла на диск.
+    transcriber = jobs.transcriber_factory()
+    for service in (transcriber, jobs.translator):
+        if hasattr(service, "ensure_configured"):
+            service.ensure_configured()
+
+    suffix = Path(file.filename or "").suffix[:10]
+    fd, tmp_name = tempfile.mkstemp(prefix="mtf_upload_", suffix=suffix)
+    tmp = Path(tmp_name)
+    size = 0
+    limit = MAX_UPLOAD_MB * 1024 * 1024
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise AppError(f"Файл больше {MAX_UPLOAD_MB} МБ.", status_code=413)
+                out.write(chunk)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    if size == 0:
+        tmp.unlink(missing_ok=True)
+        raise AppError("Файл пустой.", status_code=400)
+
+    job = jobs.start(tmp, file.filename or "запись", transcriber)
+    return {"job_id": job.id}
+
+
+@app.get("/api/jobs/{job_id}")
+async def job_status(job_id: str, jobs: JobManager = Depends(get_jobs)):
+    job = jobs.get(job_id)
+    if job is None:
+        raise AppError(
+            "Задача не найдена. Возможно, сервер перезапускался — загрузите файл снова.",
+            status_code=404,
+        )
+    return job.to_dict()
 
 
 app.mount(

@@ -1,4 +1,8 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
+python-multipart>=0.0.9
 google-genai>=3.0
+groq>=1.0
 python-dotenv>=1.0
+# ffmpeg для извлечения звука; используется, если ffmpeg не установлен в системе
+imageio-ffmpeg>=0.5
