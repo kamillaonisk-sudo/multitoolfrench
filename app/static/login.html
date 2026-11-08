@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход · MultiTool French</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="login">
+    <h1>MultiTool <span>French</span></h1>
+    <form id="login-form" class="login-box">
+      <label for="password">Пароль</label>
+      <input id="password" type="password" autocomplete="current-password" required autofocus>
+      <button class="primary" type="submit">Войти</button>
+      <p id="login-error" class="error" role="alert" hidden></p>
+    </form>
+  </main>
+  <script>
+    const form = document.getElementById("login-form");
+    const errorBox = document.getElementById("login-error");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errorBox.hidden = true;
+      const button = form.querySelector("button");
+      button.disabled = true;
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: document.getElementById("password").value }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось войти.");
+        location.href = "/";
+      } catch (err) {
+        errorBox.textContent = err.message === "Failed to fetch" ? "Нет связи с сервером." : err.message;
+        errorBox.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -8,10 +8,10 @@ from app.errors import AppError
 from app.gemini import GeminiClient
 
 SUMMARY_PROMPT = """You write study notes (a "конспект") in Russian.
-The user sends a text in French or Russian. It may be a transcript of spoken French
+The user sends a text in any language. It may be a transcript of speech
 where lines start with a timestamp like [12:34].
 
-Write the notes in Russian, even if the text is in French:
+Write the notes in Russian, whatever the language of the text:
 - overview: 2-4 sentences with the main idea of the whole text.
 - sections: the text split into logical parts, in order (2-10 parts, fewer for short texts).
   - title: a short heading for the part.
@@ -21,7 +21,7 @@ Write the notes in Russian, even if the text is in French:
 - takeaways: 2-5 main conclusions or things worth remembering.
 
 Be faithful to the text: do not add facts that are not in it.
-Keep French names and terms in their original form where a translation would be unclear."""
+Keep foreign names and terms in their original form where a translation would be unclear."""
 
 SUMMARY_SCHEMA = {
     "type": "object",

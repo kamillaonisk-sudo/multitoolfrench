@@ -12,7 +12,11 @@ from app.retry import WaitCallback
 # Старое имя оставлено для совместимости.
 TranslationError = AppError
 
-LANG_NAMES = {"fr": "French", "ru": "Russian"}
+LANG_NAMES = {
+    "fr": "French", "ru": "Russian", "en": "English", "es": "Spanish", "it": "Italian",
+    "de": "German", "pt": "Portuguese", "uk": "Ukrainian",
+    "auto": "the original language (detect it)",
+}
 
 SYSTEM_PROMPT = """You are a professional translator between {source} and {target}.
 Translate the user's text from {source} into {target}.
@@ -22,9 +26,10 @@ Translate the user's text from {source} into {target}.
 - Leave names, brands and URLs as they are.
 - Output only the translation, with no comments, notes or quotes around it."""
 
-BATCH_PROMPT = """You are a professional translator from {source} into {target}.
-The user sends a JSON array of consecutive paragraphs from a transcript of spoken {source}.
+BATCH_PROMPT = """You are a professional translator into {target}.
+The user sends a JSON array of consecutive paragraphs from a transcript of speech in {source}.
 Translate every paragraph into natural, fluent {target}.
+- If a paragraph is already in {target}, return it unchanged.
 - Return a JSON array of strings with exactly the same number of items, in the same order.
 - Item N of your answer must be the translation of item N of the input.
 - Use the neighbouring paragraphs for context, but do not move text between items.
@@ -52,16 +57,16 @@ class GeminiTranslator(GeminiClient):
     async def translate_batch(
         self,
         texts: list[str],
-        source: str,
+        source: str | None,
         target: str,
         max_wait: float = 1800,
         on_wait: WaitCallback | None = None,
     ) -> list[str]:
-        """Переводит список абзацев за один запрос, сохраняя порядок и количество."""
+        """Переводит список абзацев за один запрос, сохраняя порядок и количество.
+        source=None — язык оригинала определяет модель."""
+        source_name = LANG_NAMES.get(source or "", "any language (detect it)")
         config = types.GenerateContentConfig(
-            system_instruction=BATCH_PROMPT.format(
-                source=LANG_NAMES[source], target=LANG_NAMES[target]
-            ),
+            system_instruction=BATCH_PROMPT.format(source=source_name, target=LANG_NAMES[target]),
             temperature=0.2,
             response_mime_type="application/json",
             response_json_schema={"type": "array", "items": {"type": "string"}},
@@ -78,5 +83,5 @@ class GeminiTranslator(GeminiClient):
 
         # Модель сбилась с количеством абзацев — переводим по одному.
         return [
-            await self.translate(t, source, target, max_wait=max_wait) for t in texts
+            await self.translate(t, source or "auto", target, max_wait=max_wait) for t in texts
         ]

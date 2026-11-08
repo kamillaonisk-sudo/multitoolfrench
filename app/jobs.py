@@ -24,7 +24,7 @@ TRANSLATE_BATCH_CHARS = 6000
 class Paragraph:
     start: float
     end: float
-    fr: str
+    original: str
     ru: str = ""
 
 
@@ -33,6 +33,7 @@ class Job:
     id: str
     filename: str
     engine: str
+    language: str = "auto"
     status: str = "queued"  # queued | running | done | error
     stage: str = "В очереди…"
     progress: float = 0.0
@@ -65,7 +66,7 @@ def _merge(segments: list[Segment]) -> Paragraph:
     return Paragraph(
         start=segments[0].start,
         end=segments[-1].end,
-        fr=" ".join(s.text for s in segments),
+        original=" ".join(s.text for s in segments),
     )
 
 
@@ -77,8 +78,8 @@ def format_time(seconds: float) -> str:
 
 
 def transcript_text(paragraphs: list[Paragraph]) -> str:
-    """Французский текст расшифровки с таймкодами — исходник для конспекта."""
-    return "\n".join(f"[{format_time(p.start)}] {p.fr}" for p in paragraphs)
+    """Текст расшифровки на языке оригинала с таймкодами — исходник для конспекта."""
+    return "\n".join(f"[{format_time(p.start)}] {p.original}" for p in paragraphs)
 
 
 def batch_by_chars(paragraphs: list[Paragraph], limit: int = TRANSLATE_BATCH_CHARS) -> list[list[Paragraph]]:
@@ -86,11 +87,11 @@ def batch_by_chars(paragraphs: list[Paragraph], limit: int = TRANSLATE_BATCH_CHA
     current: list[Paragraph] = []
     size = 0
     for p in paragraphs:
-        if current and size + len(p.fr) > limit:
+        if current and size + len(p.original) > limit:
             batches.append(current)
             current, size = [], 0
         current.append(p)
-        size += len(p.fr)
+        size += len(p.original)
     if current:
         batches.append(current)
     return batches
@@ -114,9 +115,9 @@ class JobManager:
     def get(self, job_id: str) -> Job | None:
         return self.jobs.get(job_id)
 
-    def start(self, src: Path, filename: str, transcriber: Transcriber) -> Job:
+    def start(self, src: Path, filename: str, transcriber: Transcriber, language: str = "auto") -> Job:
         self._purge_old()
-        job = Job(id=uuid.uuid4().hex, filename=filename, engine=transcriber.name)
+        job = Job(id=uuid.uuid4().hex, filename=filename, engine=transcriber.name, language=language)
         self.jobs[job.id] = job
         task = asyncio.create_task(self._run(job, src, transcriber))
         self._tasks.add(task)
@@ -156,7 +157,10 @@ class JobManager:
             stage = f"Расшифровка: часть {i + 1} из {len(chunks)}"
             job.stage = stage
             segments += await transcriber.transcribe(
-                chunk, offset=i * self.chunk_seconds, on_wait=self._waiter(job, stage)
+                chunk,
+                offset=i * self.chunk_seconds,
+                on_wait=self._waiter(job, stage),
+                language=job.language,
             )
             job.progress = 0.05 + 0.6 * (i + 1) / len(chunks)
             job.paragraphs = group_paragraphs(segments)  # показываем текст по мере готовности
@@ -170,8 +174,9 @@ class JobManager:
         for i, batch in enumerate(batches):
             stage = f"Перевод: часть {i + 1} из {len(batches)}"
             job.stage = stage
+            source = None if job.language == "auto" else job.language
             translations = await self.translator.translate_batch(
-                [p.fr for p in batch], "fr", "ru", on_wait=self._waiter(job, stage)
+                [p.original for p in batch], source, "ru", on_wait=self._waiter(job, stage)
             )
             for p, ru in zip(batch, translations):
                 p.ru = ru

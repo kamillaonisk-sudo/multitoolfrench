@@ -13,6 +13,15 @@ const store = {
   },
 };
 
+// Если сервер просит пароль — переходим на страницу входа.
+function needsLogin(status) {
+  if (status === 401) {
+    location.href = "/login.html";
+    return true;
+  }
+  return false;
+}
+
 // Вкладки
 function showTab(name) {
   document.querySelectorAll(".tab").forEach((t) => {
@@ -107,6 +116,7 @@ async function translate() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, direction }),
     });
+    if (needsLogin(res.status)) return;
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось перевести текст.");
@@ -148,6 +158,7 @@ async function loadSummary(btn, container, url, body, sourceName) {
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
     });
+    if (needsLogin(res.status)) return null;
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось составить конспект.");
@@ -326,6 +337,8 @@ function uploadFile(file) {
 
   const form = new FormData();
   form.append("file", file);
+  form.append("language", $("language").value);
+  store.set("mtf_lang", $("language").value);
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/transcribe");
   xhr.upload.onprogress = (e) => {
@@ -335,6 +348,7 @@ function uploadFile(file) {
     }
   };
   xhr.onload = () => {
+    if (needsLogin(xhr.status)) return;
     let data = {};
     try { data = JSON.parse(xhr.responseText); } catch { /* пусто */ }
     if (xhr.status !== 200) {
@@ -354,6 +368,7 @@ async function poll(jobId) {
   let job;
   try {
     const res = await fetch(`/api/jobs/${jobId}`);
+    if (needsLogin(res.status)) return;
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       showUpload(typeof data.detail === "string" ? data.detail : "Задача не найдена.");
@@ -397,7 +412,7 @@ function cell(className, text) {
 }
 
 function renderTranscript(paragraphs) {
-  const key = paragraphs.map((p) => p.fr.length + ":" + p.ru.length).join(",");
+  const key = paragraphs.map((p) => p.original.length + ":" + p.ru.length).join(",");
   if (key === lastRenderKey) return;
   lastRenderKey = key;
 
@@ -405,7 +420,7 @@ function renderTranscript(paragraphs) {
   if (paragraphs.length) {
     const head = document.createElement("div");
     head.className = "row head";
-    head.append(cell("", ""), cell("", "Французский"), cell("", "Русский"));
+    head.append(cell("", ""), cell("", "Оригинал"), cell("", "Русский"));
     rows.push(head);
   }
   for (const p of paragraphs) {
@@ -413,7 +428,7 @@ function renderTranscript(paragraphs) {
     row.className = "row";
     row.append(
       cell("time", formatTime(p.start)),
-      cell("fr", p.fr),
+      cell("original", p.original),
       p.ru ? cell("ru", p.ru) : cell("ru pending", "перевод появится позже…"),
     );
     rows.push(row);
@@ -434,13 +449,19 @@ downloadBtn.addEventListener("click", () => {
   const lines = [`Расшифровка: ${currentJob.filename}`, ""];
   for (const p of currentJob.paragraphs) {
     lines.push(`[${formatTime(p.start)} – ${formatTime(p.end)}]`);
-    lines.push(`FR: ${p.fr}`);
-    lines.push(`RU: ${p.ru || "(нет перевода)"}`);
+    lines.push(`Оригинал: ${p.original}`);
+    lines.push(`Перевод:  ${p.ru || "(нет перевода)"}`);
     lines.push("");
   }
   const base = currentJob.filename.replace(/\.[^.]+$/, "") || "transcript";
   downloadText(lines.join("\r\n"), `${base}_fr-ru.txt`);
 });
+
+// Запоминаем выбранный язык записи.
+const savedLang = store.get("mtf_lang");
+if (savedLang && [...$("language").options].some((o) => o.value === savedLang)) {
+  $("language").value = savedLang;
+}
 
 // Если страницу перезагрузили во время обработки — продолжаем следить за задачей.
 const savedJob = store.get("mtf_job");

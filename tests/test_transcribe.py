@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.audio import ffmpeg_exe, split_audio
 from app.errors import AppError
-from app.jobs import JobManager, Paragraph, batch_by_chars, group_paragraphs
+from app.jobs import Job, JobManager, Paragraph, batch_by_chars, group_paragraphs
 from app.main import app, get_jobs
 from app.retry import with_retries
 from app.transcribe import Segment, parse_gemini_segments, parse_groq_segments
@@ -75,7 +75,7 @@ def test_group_paragraphs_breaks_on_sentence_end():
     paras = group_paragraphs(segs)
     assert len(paras) == 2
     assert paras[0].start == 0 and paras[0].end == 25
-    assert paras[1].fr.startswith("Phrase 5")
+    assert paras[1].original.startswith("Phrase 5")
 
 
 def test_group_paragraphs_forces_break_on_long_speech():
@@ -135,13 +135,18 @@ def test_translate_batch_falls_back_when_count_mismatch():
 
 class FakeTranscriber:
     name = "Fake"
+    languages = []
 
-    async def transcribe(self, path, offset, on_wait=None):
+    async def transcribe(self, path, offset, on_wait=None, language="auto"):
+        FakeTranscriber.languages.append(language)
         return [Segment(offset, offset + 4, f"Phrase à {int(offset)} secondes.")]
 
 
 class FakeTranslator:
+    sources = []
+
     async def translate_batch(self, texts, source, target, on_wait=None, max_wait=0):
+        FakeTranslator.sources.append(source)
         return [f"Перевод: {t}" for t in texts]
 
 
@@ -170,7 +175,7 @@ def test_transcribe_end_to_end(tmp_path):
 
     assert job["status"] == "done", job
     assert job["engine"] == "Fake"
-    texts = [p["fr"] for p in job["paragraphs"]]
+    texts = [p["original"] for p in job["paragraphs"]]
     assert "Phrase à 0 secondes." in texts[0]
     assert "Phrase à 20 secondes." in " ".join(texts)
     assert all(p["ru"].startswith("Перевод: ") for p in job["paragraphs"])
@@ -220,3 +225,52 @@ def test_retry_gives_up_after_max_attempts(monkeypatch):
     with pytest.raises(RuntimeError):
         asyncio.run(with_retries(always_fails, lambda e: 5, 10_000, max_attempts=4))
     assert len(calls) == 4
+
+
+def test_language_is_passed_through(tmp_path):
+    FakeTranscriber.languages.clear()
+    FakeTranslator.sources.clear()
+    manager = JobManager(FakeTranscriber, FakeTranslator(), chunk_seconds=10)
+    app.dependency_overrides[get_jobs] = lambda: manager
+    try:
+        src = make_audio(tmp_path / "talk.mp3", 5)
+        with TestClient(app) as client:
+            res = client.post("/api/transcribe", data={"language": "en"},
+                              files={"file": ("talk.mp3", src.read_bytes(), "audio/mpeg")})
+            job = wait_for_job(client, res.json()["job_id"])
+            bad = client.post("/api/transcribe", data={"language": "xx"},
+                              files={"file": ("talk.mp3", src.read_bytes(), "audio/mpeg")})
+    finally:
+        app.dependency_overrides.clear()
+    assert job["status"] == "done" and job["language"] == "en"
+    assert FakeTranscriber.languages == ["en"]
+    assert FakeTranslator.sources == ["en"]
+    assert bad.status_code == 400
+
+
+def test_job_language_defaults_to_auto():
+    assert Job(id="j", filename="a", engine="Fake").language == "auto"
+
+
+def test_groq_omits_language_when_auto(tmp_path):
+    from app.transcribe import GroqTranscriber
+
+    sent = []
+
+    class FakeCreate:
+        async def create(self, **kwargs):
+            sent.append(kwargs)
+
+            class R:
+                def to_dict(self):
+                    return {"segments": [{"start": 0, "end": 1, "text": "Hi", "no_speech_prob": 0}]}
+            return R()
+
+    t = GroqTranscriber("key")
+    t.client = type("C", (), {"audio": type("A", (), {"transcriptions": FakeCreate()})()})()
+    chunk = tmp_path / "c.mp3"
+    chunk.write_bytes(b"x")
+    asyncio.run(t.transcribe(chunk, 0))
+    asyncio.run(t.transcribe(chunk, 0, language="fr"))
+    assert "language" not in sent[0]
+    assert sent[1]["language"] == "fr"

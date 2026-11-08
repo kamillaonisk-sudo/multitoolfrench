@@ -1,4 +1,4 @@
-"""Расшифровка французской речи: Groq (Whisper) или Gemini."""
+"""Расшифровка речи на любом языке: Groq (Whisper) или Gemini."""
 
 import json
 import os
@@ -22,11 +22,34 @@ class Segment:
     text: str
 
 
+# Языки, которые можно выбрать вручную. "auto" — определить автоматически.
+LANGUAGES = {
+    "auto": "Определить автоматически",
+    "fr": "Французский",
+    "en": "Английский",
+    "es": "Испанский",
+    "it": "Итальянский",
+    "de": "Немецкий",
+    "pt": "Португальский",
+    "ru": "Русский",
+    "uk": "Украинский",
+}
+
+LANGUAGE_NAMES_EN = {
+    "fr": "French", "en": "English", "es": "Spanish", "it": "Italian",
+    "de": "German", "pt": "Portuguese", "ru": "Russian", "uk": "Ukrainian",
+}
+
+
 class Transcriber(Protocol):
     name: str
 
     async def transcribe(
-        self, path: Path, offset: float, on_wait: WaitCallback | None = None
+        self,
+        path: Path,
+        offset: float,
+        on_wait: WaitCallback | None = None,
+        language: str = "auto",
     ) -> list[Segment]: ...
 
 
@@ -62,17 +85,19 @@ class GroqTranscriber:
             return 5.0
         return None
 
-    async def transcribe(self, path, offset, on_wait=None):
+    async def transcribe(self, path, offset, on_wait=None, language="auto"):
         audio = path.read_bytes()
+        # Без параметра language Whisper определяет язык сам.
+        extra = {} if language == "auto" else {"language": language}
 
         async def call():
             return await self.client.audio.transcriptions.create(
                 file=(path.name, audio),
                 model=self.model,
-                language="fr",
                 response_format="verbose_json",
                 timestamp_granularities=["segment"],
                 temperature=0,
+                **extra,
             )
 
         try:
@@ -99,7 +124,8 @@ def parse_groq_segments(data: dict, offset: float) -> list[Segment]:
     return segments
 
 
-GEMINI_TRANSCRIBE_PROMPT = """Transcribe this French audio verbatim, in French.
+GEMINI_TRANSCRIBE_PROMPT = """Transcribe this audio verbatim, in the language it is spoken in.
+{language_hint}
 Split it into short consecutive phrases (one sentence or less each).
 For each phrase give its start time from the beginning of this audio as MM:SS.
 Do not translate, summarize or skip anything. Skip music and silence."""
@@ -145,7 +171,11 @@ class GeminiTranscriber(GeminiClient):
         super().__init__(*args, **kwargs)
         self.chunk_seconds = chunk_seconds
 
-    async def transcribe(self, path, offset, on_wait=None):
+    async def transcribe(self, path, offset, on_wait=None, language="auto"):
+        if language in LANGUAGE_NAMES_EN:
+            hint = f"The speech is mostly in {LANGUAGE_NAMES_EN[language]}."
+        else:
+            hint = "If several languages are spoken, write each part in its own language."
         config = types.GenerateContentConfig(
             temperature=0,
             response_mime_type="application/json",
@@ -153,7 +183,7 @@ class GeminiTranscriber(GeminiClient):
         )
         contents = [
             types.Part.from_bytes(data=path.read_bytes(), mime_type="audio/mp3"),
-            GEMINI_TRANSCRIBE_PROMPT,
+            GEMINI_TRANSCRIBE_PROMPT.format(language_hint=hint),
         ]
         raw = await self.generate(contents, config, max_wait=1800, on_wait=on_wait)
         try:

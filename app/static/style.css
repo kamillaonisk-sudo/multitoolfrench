@@ -150,6 +150,24 @@ textarea:focus { outline: none; }
 
 .center { text-align: center; }
 
+.lang-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
 .footer-buttons { display: flex; gap: 6px; }
 
 .summary {
@@ -255,3 +273,32 @@ textarea:focus { outline: none; }
   .row.head + .row { border-top: 0; }
   .row .ru { padding-top: 4px; }
 }
+
+.login {
+  max-width: 360px;
+  margin: 12vh auto 0;
+  padding: 16px;
+}
+
+.login h1 { margin-bottom: 20px; text-align: center; }
+
+.login-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.login-box input {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.login-box input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
