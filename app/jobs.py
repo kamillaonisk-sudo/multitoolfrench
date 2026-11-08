@@ -38,6 +38,7 @@ class Job:
     progress: float = 0.0
     paragraphs: list[Paragraph] = field(default_factory=list)
     error: str | None = None
+    summary: dict | None = None
     created: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict:
@@ -66,6 +67,18 @@ def _merge(segments: list[Segment]) -> Paragraph:
         end=segments[-1].end,
         fr=" ".join(s.text for s in segments),
     )
+
+
+def format_time(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    h, rest = divmod(seconds, 3600)
+    m, s = divmod(rest, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def transcript_text(paragraphs: list[Paragraph]) -> str:
+    """Французский текст расшифровки с таймкодами — исходник для конспекта."""
+    return "\n".join(f"[{format_time(p.start)}] {p.fr}" for p in paragraphs)
 
 
 def batch_by_chars(paragraphs: list[Paragraph], limit: int = TRANSLATE_BATCH_CHARS) -> list[list[Paragraph]]:

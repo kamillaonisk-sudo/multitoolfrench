@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 from app.errors import AppError  # noqa: E402
-from app.jobs import JobManager  # noqa: E402
+from app.jobs import JobManager, transcript_text  # noqa: E402
+from app.summary import GeminiSummarizer  # noqa: E402
 from app.transcribe import make_transcriber  # noqa: E402
 from app.translator import GeminiTranslator, detect_source  # noqa: E402
 
@@ -23,6 +24,7 @@ app = FastAPI(title="MultiTool French")
 
 _translator = GeminiTranslator()
 _jobs = JobManager(make_transcriber, _translator)
+_summarizer = GeminiSummarizer()
 
 
 def get_translator() -> GeminiTranslator:
@@ -31,6 +33,10 @@ def get_translator() -> GeminiTranslator:
 
 def get_jobs() -> JobManager:
     return _jobs
+
+
+def get_summarizer() -> GeminiSummarizer:
+    return _summarizer
 
 
 @app.exception_handler(AppError)
@@ -109,6 +115,33 @@ async def job_status(job_id: str, jobs: JobManager = Depends(get_jobs)):
             status_code=404,
         )
     return job.to_dict()
+
+
+# ---------- Конспект ----------
+
+class SummaryRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH * 2)
+
+
+@app.post("/api/summary")
+async def summary(req: SummaryRequest, summarizer=Depends(get_summarizer)):
+    if not req.text.strip():
+        raise AppError("Нет текста для конспекта.", status_code=400)
+    return await summarizer.summarize(req.text.strip())
+
+
+@app.post("/api/jobs/{job_id}/summary")
+async def job_summary(
+    job_id: str, jobs: JobManager = Depends(get_jobs), summarizer=Depends(get_summarizer)
+):
+    job = jobs.get(job_id)
+    if job is None:
+        raise AppError("Задача не найдена. Загрузите файл снова.", status_code=404)
+    if job.status != "done":
+        raise AppError("Конспект можно сделать, когда расшифровка закончится.", status_code=409)
+    if job.summary is None:
+        job.summary = await summarizer.summarize(transcript_text(job.paragraphs), max_wait=600)
+    return job.summary
 
 
 app.mount(

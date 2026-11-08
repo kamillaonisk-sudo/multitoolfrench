@@ -38,7 +38,10 @@
           <div id="result" class="result" aria-live="polite"></div>
           <div class="box-footer">
             <span class="hint">Ctrl + Enter — перевести</span>
-            <button id="copy" class="ghost" disabled>Копировать</button>
+            <div class="footer-buttons">
+              <button id="summary-btn" class="ghost" disabled>Конспект</button>
+              <button id="copy" class="ghost" disabled>Копировать</button>
+            </div>
           </div>
         </div>
       </div>
@@ -47,6 +50,7 @@
         <button id="translate" class="primary">Перевести</button>
       </div>
       <p id="error" class="error" role="alert" hidden></p>
+      <div id="summary-translate" class="summary" hidden></div>
     </section>
 
     <section id="tab-transcribe" class="panel" hidden>
@@ -67,6 +71,7 @@
             <div id="job-stage" class="hint" aria-live="polite"></div>
           </div>
           <div class="job-actions">
+            <button id="job-summary-btn" class="ghost" disabled>Конспект</button>
             <button id="download" class="primary" disabled>Скачать TXT</button>
             <button id="new-file" class="ghost">Новый файл</button>
           </div>
@@ -74,6 +79,7 @@
         <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
         <p id="job-note" class="hint">Вкладку можно закрыть — обработка продолжится, а результат появится здесь, когда вы вернётесь.</p>
         <p id="job-error" class="error" role="alert" hidden></p>
+        <div id="summary-job" class="summary" hidden></div>
         <div id="transcript" class="transcript"></div>
       </div>
     </section>

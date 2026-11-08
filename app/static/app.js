@@ -58,10 +58,16 @@ source.addEventListener("keydown", (e) => {
   }
 });
 
+const summaryBtn = $("summary-btn");
+const summaryTranslate = $("summary-translate");
+let lastTranslatedText = "";
+
 $("clear").addEventListener("click", () => {
   source.value = "";
   result.textContent = "";
   copyBtn.disabled = true;
+  summaryBtn.disabled = true;
+  summaryTranslate.hidden = true;
   errorBox.hidden = true;
   $("detected").textContent = "";
   source.dispatchEvent(new Event("input"));
@@ -92,6 +98,8 @@ async function translate() {
   result.classList.add("loading");
   result.textContent = "Перевожу…";
   copyBtn.disabled = true;
+  summaryBtn.disabled = true;
+  summaryTranslate.hidden = true;
 
   try {
     const res = await fetch("/api/translate", {
@@ -105,6 +113,8 @@ async function translate() {
     }
     result.textContent = data.translation;
     copyBtn.disabled = false;
+    summaryBtn.disabled = false;
+    lastTranslatedText = text;
     if (direction === "auto") {
       $("detected").textContent = `Определено: ${LANG_LABEL[data.source]} → ${LANG_LABEL[data.target]}`;
     }
@@ -119,6 +129,121 @@ async function translate() {
   }
 }
 
+summaryBtn.addEventListener("click", () => {
+  loadSummary(summaryBtn, summaryTranslate, "/api/summary", { text: lastTranslatedText }, null);
+});
+
+// ---------- Конспект ----------
+
+async function loadSummary(btn, container, url, body, sourceName) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Составляю…";
+  container.hidden = false;
+  container.className = "summary loading";
+  container.textContent = "Составляю конспект… Для длинной записи это может занять минуту.";
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось составить конспект.");
+    }
+    renderSummary(container, data, sourceName);
+    container.scrollIntoView({ behavior: "smooth", block: "start" });
+    return data;
+  } catch (err) {
+    container.className = "summary";
+    const p = document.createElement("p");
+    p.className = "error";
+    p.textContent = err.message === "Failed to fetch" ? "Нет связи с сервером." : err.message;
+    container.replaceChildren(p);
+    return null;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+function summaryToText(s, sourceName) {
+  const lines = [sourceName ? `Конспект: ${sourceName}` : "Конспект", "", s.overview, ""];
+  for (const sec of s.sections) {
+    lines.push((sec.start ? `[${sec.start}] ` : "") + sec.title);
+    for (const point of sec.points) lines.push(`  • ${point}`);
+    lines.push("");
+  }
+  if (s.takeaways.length) {
+    lines.push("Главные выводы");
+    for (const t of s.takeaways) lines.push(`  • ${t}`);
+  }
+  return lines.join("\r\n");
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function list(items) {
+  const ul = el("ul");
+  for (const item of items) ul.append(el("li", "", item));
+  return ul;
+}
+
+function renderSummary(container, s, sourceName) {
+  container.className = "summary";
+  const text = summaryToText(s, sourceName);
+
+  const copy = el("button", "ghost", "Копировать");
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      copy.textContent = "Скопировано";
+    } catch {
+      copy.textContent = "Не удалось";
+    }
+    setTimeout(() => (copy.textContent = "Копировать"), 1500);
+  });
+  const download = el("button", "ghost", "Скачать TXT");
+  download.addEventListener("click", () => {
+    const base = (sourceName || "text").replace(/\.[^.]+$/, "") || "text";
+    downloadText(text, `${base}_konspekt.txt`);
+  });
+
+  const buttons = el("div", "footer-buttons");
+  buttons.append(copy, download);
+  const head = el("div", "summary-head");
+  head.append(el("h2", "", "Конспект"), buttons);
+
+  const parts = [head];
+  if (s.overview) parts.push(el("p", "overview", s.overview));
+  for (const sec of s.sections) {
+    const h3 = el("h3");
+    if (sec.start) h3.append(el("span", "time", sec.start));
+    h3.append(sec.title);
+    parts.push(h3, list(sec.points));
+  }
+  if (s.takeaways.length) {
+    parts.push(el("h3", "", "Главные выводы"), list(s.takeaways));
+  }
+  container.replaceChildren(...parts);
+  container.hidden = false;
+}
+
+function downloadText(text, filename) {
+  const blob = new Blob(["\ufeff" + text], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 // ---------- Расшифровка ----------
 
 const fileInput = $("file-input");
@@ -127,6 +252,8 @@ const uploadView = $("upload-view");
 const jobView = $("job-view");
 const transcriptEl = $("transcript");
 const downloadBtn = $("download");
+const jobSummaryBtn = $("job-summary-btn");
+const summaryJob = $("summary-job");
 
 let currentJob = null;
 let pollTimer = null;
@@ -173,6 +300,8 @@ function showJobView(filename) {
   transcriptEl.replaceChildren();
   lastRenderKey = "";
   downloadBtn.disabled = true;
+  jobSummaryBtn.disabled = true;
+  summaryJob.hidden = true;
 }
 
 dropzone.addEventListener("dragover", (e) => {
@@ -244,7 +373,9 @@ async function poll(jobId) {
   if (job.status === "done") {
     setProgress(1, `Готово · ${job.paragraphs.length} ${plural(job.paragraphs.length, "абзац", "абзаца", "абзацев")} · расшифровка: ${job.engine}`);
     downloadBtn.disabled = false;
+    jobSummaryBtn.disabled = false;
     $("job-note").hidden = true;
+    if (job.summary && summaryJob.hidden) renderSummary(summaryJob, job.summary, job.filename);
   } else if (job.status === "error") {
     setProgress(job.progress, "Ошибка");
     $("job-error").textContent = job.error;
@@ -290,6 +421,14 @@ function renderTranscript(paragraphs) {
   transcriptEl.replaceChildren(...rows);
 }
 
+jobSummaryBtn.addEventListener("click", async () => {
+  if (!currentJob) return;
+  const data = await loadSummary(
+    jobSummaryBtn, summaryJob, `/api/jobs/${currentJob.id}/summary`, null, currentJob.filename,
+  );
+  if (data) currentJob.summary = data;
+});
+
 downloadBtn.addEventListener("click", () => {
   if (!currentJob) return;
   const lines = [`Расшифровка: ${currentJob.filename}`, ""];
@@ -299,13 +438,8 @@ downloadBtn.addEventListener("click", () => {
     lines.push(`RU: ${p.ru || "(нет перевода)"}`);
     lines.push("");
   }
-  const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/plain;charset=utf-8" });
   const base = currentJob.filename.replace(/\.[^.]+$/, "") || "transcript";
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `${base}_fr-ru.txt`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  downloadText(lines.join("\r\n"), `${base}_fr-ru.txt`);
 });
 
 // Если страницу перезагрузили во время обработки — продолжаем следить за задачей.
