@@ -6,7 +6,7 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Form, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -15,6 +15,7 @@ load_dotenv()
 from app import auth  # noqa: E402
 from app.errors import AppError  # noqa: E402
 from app.jobs import JobManager, transcript_text  # noqa: E402
+from app.pdf import summary_pdf, transcript_pdf  # noqa: E402
 from app.summary import GeminiSummarizer  # noqa: E402
 from app.transcribe import LANGUAGES, make_transcriber  # noqa: E402
 from app.translator import GeminiTranslator, detect_source  # noqa: E402
@@ -164,18 +165,26 @@ async def job_status(job_id: str, jobs: JobManager = Depends(get_jobs)):
 
 class SummaryRequest(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH * 2)
+    topics: list[str] = Field(default_factory=list, max_length=200)
+
+
+class JobSummaryRequest(BaseModel):
+    topics: list[str] = Field(default_factory=list, max_length=200)
 
 
 @app.post("/api/summary")
 async def summary(req: SummaryRequest, summarizer=Depends(get_summarizer)):
     if not req.text.strip():
         raise AppError("Нет текста для конспекта.", status_code=400)
-    return await summarizer.summarize(req.text.strip())
+    return await summarizer.summarize(req.text.strip(), topics=req.topics)
 
 
 @app.post("/api/jobs/{job_id}/summary")
 async def job_summary(
-    job_id: str, jobs: JobManager = Depends(get_jobs), summarizer=Depends(get_summarizer)
+    job_id: str,
+    req: JobSummaryRequest | None = None,
+    jobs: JobManager = Depends(get_jobs),
+    summarizer=Depends(get_summarizer),
 ):
     job = jobs.get(job_id)
     if job is None:
@@ -183,8 +192,56 @@ async def job_summary(
     if job.status != "done":
         raise AppError("Конспект можно сделать, когда расшифровка закончится.", status_code=409)
     if job.summary is None:
-        job.summary = await summarizer.summarize(transcript_text(job.paragraphs), max_wait=600)
+        job.summary = await summarizer.summarize(
+            transcript_text(job.paragraphs), max_wait=600, topics=req.topics if req else []
+        )
     return job.summary
+
+
+# ---------- PDF ----------
+
+class SummaryContent(BaseModel):
+    title: str = ""
+    overview: str = ""
+    sections: list[dict] = Field(default_factory=list, max_length=100)
+    takeaways: list[str] = Field(default_factory=list, max_length=50)
+
+
+class SummaryPdfRequest(BaseModel):
+    title: str = Field(default="Конспект", max_length=300)
+    meta: str = Field(default="", max_length=500)
+    summary: SummaryContent
+
+
+class TranscriptParagraph(BaseModel):
+    start: float = 0
+    original: str = Field(default="", max_length=20_000)
+    ru: str = Field(default="", max_length=20_000)
+
+
+class TranscriptPdfRequest(BaseModel):
+    title: str = Field(default="Расшифровка", max_length=300)
+    paragraphs: list[TranscriptParagraph] = Field(max_length=10_000)
+
+
+def _pdf_response(data: bytes) -> Response:
+    return Response(content=data, media_type="application/pdf")
+
+
+@app.post("/api/pdf/summary")
+async def pdf_summary(req: SummaryPdfRequest):
+    data = await asyncio.to_thread(
+        summary_pdf, req.title or "Конспект", req.summary.model_dump(), req.meta
+    )
+    return _pdf_response(data)
+
+
+@app.post("/api/pdf/transcript")
+async def pdf_transcript(req: TranscriptPdfRequest):
+    data = await asyncio.to_thread(
+        transcript_pdf, req.title or "Расшифровка", [p.model_dump() for p in req.paragraphs]
+    )
+    return _pdf_response(data)
 
 
 app.mount(

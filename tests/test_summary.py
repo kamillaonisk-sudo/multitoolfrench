@@ -18,9 +18,11 @@ SUMMARY = {
 class FakeSummarizer:
     def __init__(self):
         self.calls = []
+        self.topics = []
 
-    async def summarize(self, text, max_wait=0):
+    async def summarize(self, text, max_wait=0, topics=None):
         self.calls.append(text)
+        self.topics.append(topics)
         return SUMMARY
 
 
@@ -81,6 +83,9 @@ def test_clean_drops_junk():
         {"title": "A", "start": "", "points": ["x", "", 3]}, "мусор", {"title": "", "points": []}],
         "takeaways": "не список"}
     assert _clean(data) == {
+        "title": "",
+        "topic": "Без темы",
+        "tags": [],
         "overview": "Суть",
         "sections": [{"title": "A", "start": "", "points": ["x", "3"]}],
         "takeaways": [],
@@ -103,3 +108,41 @@ def test_summarizer_bad_json():
 
     with pytest.raises(AppError):
         asyncio.run(Fake(api_key="k").summarize("texte"))
+
+
+def test_existing_topics_are_passed(fake):
+    client = TestClient(app)
+    client.post("/api/summary", json={"text": "texte", "topics": ["История", "Кулинария"]})
+    assert fake.topics[-1] == ["История", "Кулинария"]
+    make_manager()
+    client.post("/api/jobs/j1/summary", json={"topics": ["Кино"]})
+    assert fake.topics[-1] == ["Кино"]
+
+
+def test_topics_hint_in_prompt():
+    seen = {}
+
+    class Fake(GeminiSummarizer):
+        async def generate(self, contents, config, max_wait=0, on_wait=None):
+            seen["prompt"] = config.system_instruction
+            return '{"title": "Т", "topic": "История", "tags": ["a"], "overview": "o", "sections": [], "takeaways": []}'
+
+    result = asyncio.run(Fake(api_key="k").summarize("texte", topics=["История", " "]))
+    assert "История" in seen["prompt"] and result["topic"] == "История"
+    asyncio.run(Fake(api_key="k").summarize("texte"))
+    assert "already has these topics" not in seen["prompt"]
+
+
+def test_pdf_summary_and_transcript():
+    client = TestClient(app)
+    res = client.post("/api/pdf/summary", json={
+        "title": "Лионская кухня", "meta": "Тема: Кулинария",
+        "summary": {"overview": "Суть", "sections": [{"title": "Раздел", "start": "00:30",
+                    "points": ["пункт с буквой ё и é"]}], "takeaways": ["вывод"]}})
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/pdf"
+    assert res.content.startswith(b"%PDF")
+    res = client.post("/api/pdf/transcript", json={
+        "title": "talk.mp3",
+        "paragraphs": [{"start": 65, "original": "Ça va très bien.", "ru": "Всё очень хорошо."}] * 30})
+    assert res.status_code == 200 and res.content.startswith(b"%PDF")

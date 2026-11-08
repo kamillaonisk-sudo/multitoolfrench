@@ -12,6 +12,10 @@ The user sends a text in any language. It may be a transcript of speech
 where lines start with a timestamp like [12:34].
 
 Write the notes in Russian, whatever the language of the text:
+- title: a short title for the whole text, 3-8 words.
+- topic: one broad subject area, 1-3 words, capitalized (for example "История", "Кулинария",
+  "Французский язык", "Политика"). {topics_hint}
+- tags: 2-5 short keywords (lowercase, 1-3 words each).
 - overview: 2-4 sentences with the main idea of the whole text.
 - sections: the text split into logical parts, in order (2-10 parts, fewer for short texts).
   - title: a short heading for the part.
@@ -26,6 +30,9 @@ Keep foreign names and terms in their original form where a translation would be
 SUMMARY_SCHEMA = {
     "type": "object",
     "properties": {
+        "title": {"type": "string"},
+        "topic": {"type": "string"},
+        "tags": {"type": "array", "items": {"type": "string"}},
         "overview": {"type": "string"},
         "sections": {
             "type": "array",
@@ -41,7 +48,7 @@ SUMMARY_SCHEMA = {
         },
         "takeaways": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["overview", "sections", "takeaways"],
+    "required": ["title", "topic", "tags", "overview", "sections", "takeaways"],
 }
 
 
@@ -62,6 +69,9 @@ def _clean(data) -> dict:
                 "points": strings(s.get("points")),
             })
     return {
+        "title": str(data.get("title", "")).strip(),
+        "topic": str(data.get("topic", "")).strip() or "Без темы",
+        "tags": strings(data.get("tags"))[:5],
         "overview": str(data.get("overview", "")).strip(),
         "sections": sections,
         "takeaways": strings(data.get("takeaways")),
@@ -69,9 +79,17 @@ def _clean(data) -> dict:
 
 
 class GeminiSummarizer(GeminiClient):
-    async def summarize(self, text: str, max_wait: float = 120) -> dict:
+    async def summarize(
+        self, text: str, max_wait: float = 120, topics: list[str] | None = None
+    ) -> dict:
+        topics = [t.strip() for t in (topics or []) if t.strip()][:50]
+        if topics:
+            hint = ("The user already has these topics; if one of them fits, use it exactly: "
+                    + "; ".join(topics) + ".")
+        else:
+            hint = ""
         config = types.GenerateContentConfig(
-            system_instruction=SUMMARY_PROMPT,
+            system_instruction=SUMMARY_PROMPT.format(topics_hint=hint),
             temperature=0.3,
             response_mime_type="application/json",
             response_json_schema=SUMMARY_SCHEMA,

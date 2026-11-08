@@ -6,3 +6,4 @@ groq>=1.0
 python-dotenv>=1.0
 # ffmpeg для извлечения звука; используется, если ffmpeg не установлен в системе
 imageio-ffmpeg>=0.5
+fpdf2>=2.7

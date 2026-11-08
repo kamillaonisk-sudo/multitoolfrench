@@ -12,6 +12,7 @@
     <nav class="tabs" role="tablist">
       <button class="tab active" role="tab" aria-selected="true" data-tab="translate">Переводчик</button>
       <button class="tab" role="tab" aria-selected="false" data-tab="transcribe">Расшифровка</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="library">Конспекты</button>
     </nav>
   </header>
 
@@ -87,7 +88,8 @@
           </div>
           <div class="job-actions">
             <button id="job-summary-btn" class="ghost" disabled>Конспект</button>
-            <button id="download" class="primary" disabled>Скачать TXT</button>
+            <button id="download" class="ghost" disabled>Скачать TXT</button>
+            <button id="download-pdf" class="primary" disabled>Скачать PDF</button>
             <button id="new-file" class="ghost">Новый файл</button>
           </div>
         </div>
@@ -98,8 +100,47 @@
         <div id="transcript" class="transcript"></div>
       </div>
     </section>
+
+    <section id="tab-library" class="panel" hidden>
+      <div id="lib-list-view">
+        <div class="lib-toolbar">
+          <input id="lib-search" type="search" placeholder="Поиск по конспектам…" aria-label="Поиск">
+          <select id="lib-sort" aria-label="Сортировка">
+            <option value="new">Сначала новые</option>
+            <option value="old">Сначала старые</option>
+            <option value="title">По названию</option>
+          </select>
+        </div>
+        <div id="lib-topics" class="chips"></div>
+        <p id="lib-temporary" class="error" hidden>Браузер не даёт сохранять данные (возможно, включён приватный режим) — конспекты пропадут после закрытия страницы.</p>
+        <div id="lib-list" class="lib-list"></div>
+        <div class="lib-backup">
+          <span class="hint">Конспекты хранятся только в этом браузере. Чтобы перенести их на другое устройство или не потерять, скачайте резервную копию.</span>
+          <div class="footer-buttons">
+            <button id="lib-export" class="ghost">Скачать резервную копию</button>
+            <label class="ghost upload-button">Восстановить из копии
+              <input id="lib-import" type="file" accept="application/json,.json" hidden>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div id="lib-detail-view" hidden>
+        <button id="lib-back" class="ghost">← Все конспекты</button>
+        <div class="lib-edit">
+          <label for="lib-topic">Тема:</label>
+          <input id="lib-topic" list="lib-topic-list" placeholder="Например, История">
+          <datalist id="lib-topic-list"></datalist>
+          <button id="lib-rename" class="ghost">Переименовать</button>
+          <button id="lib-delete" class="ghost danger">Удалить</button>
+        </div>
+        <div id="lib-extra" class="lib-extra" hidden></div>
+        <div id="lib-summary" class="summary"></div>
+      </div>
+    </section>
   </main>
 
   <script src="app.js"></script>
+  <script src="library.js"></script>
 </body>
 </html>
