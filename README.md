@@ -48,7 +48,7 @@ uvicorn app.main:app --reload
 | Переменная | Что это |
 |---|---|
 | `GEMINI_API_KEY` | Ключ Gemini API, обязателен |
-| `GEMINI_MODEL` | Модель Gemini, по умолчанию `gemini-flash-lite-latest` |
+| `GEMINI_MODEL` | Модель Gemini; пусто — подбирается автоматически |
 | `GROQ_API_KEY` | Ключ Groq, необязателен |
 | `TRANSCRIBE_ENGINE` | `auto`, `groq` или `gemini` |
 | `MAX_UPLOAD_MB` | Максимальный размер файла, по умолчанию 2000 МБ |
