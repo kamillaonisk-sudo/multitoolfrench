@@ -98,6 +98,9 @@ const LibraryView = (() => {
   const sort = $("lib-sort");
   let activeTopic = store.get("mtf_lib_topic") || "";
   let currentId = null;
+  let visibleNotes = [];
+  let askAll = null;
+  let askOne = null;
 
   function matches(note, query) {
     if (!query) return true;
@@ -145,6 +148,10 @@ const LibraryView = (() => {
 
     const visible = sorted(notes.filter((n) =>
       (!activeTopic || (n.topic || "Без темы") === activeTopic) && matches(n, search.value.trim())));
+
+    visibleNotes = visible;
+    $("ask-all").hidden = notes.length === 0;
+    askAll?.updateScope();
 
     if (!notes.length) {
       listEl.replaceChildren(el("p", "empty",
@@ -208,7 +215,16 @@ const LibraryView = (() => {
     extra.hidden = !extra.childElementCount;
 
     renderSummary($("lib-summary"), note);
+    askOne?.reset();
     window.scrollTo({ top: 0 });
+  }
+
+  function scopeLabel() {
+    const n = visibleNotes.length;
+    const count = `${n} ${plural(n, "запись", "записи", "записей")}`;
+    if (search.value.trim()) return `Вопрос по найденным: ${count}`;
+    if (activeTopic) return `Вопрос по теме «${activeTopic}»: ${count}`;
+    return `Вопрос по всем конспектам: ${count}`;
   }
 
   function back() {
@@ -283,7 +299,147 @@ const LibraryView = (() => {
   Library.onChange(() => {
     if (!currentId) render();
   });
+
+  askAll = createAskBox($("ask-all"), {
+    heading: "Спросить по конспектам",
+    placeholder: "Например: что говорилось о кнелях? Какие даты упоминались?",
+    getScope: async () => ({ notes: visibleNotes, label: scopeLabel() }),
+  });
+  askOne = createAskBox($("ask-one"), {
+    heading: "Спросить по этой записи",
+    placeholder: "Задайте вопрос по этой записи…",
+    getScope: async () => {
+      const note = currentId ? await Library.get(currentId) : null;
+      return { notes: note ? [note] : [], label: note ? `По записи «${note.title}»` : "" };
+    },
+  });
   render();
 
   return { open, render };
 })();
+
+// ---------- Вопросы по конспектам ----------
+
+function noteForAsk(note) {
+  return {
+    id: note.id,
+    title: note.title || "",
+    topic: note.topic || "",
+    created: note.created || "",
+    filename: note.filename || null,
+    summary: note.summary || {},
+    paragraphs: note.paragraphs ? note.paragraphs.map((p) => ({ start: p.start, original: p.original })) : null,
+    text: note.text || null,
+  };
+}
+
+// Блок «вопрос — ответ». getScope() возвращает { notes, label }.
+function createAskBox(container, { heading, placeholder, getScope }) {
+  let history = [];
+
+  const scopeEl = el("div", "hint ask-scope");
+  const thread = el("div", "ask-thread");
+  const input = el("textarea", "ask-input");
+  input.rows = 2;
+  input.placeholder = placeholder;
+  input.maxLength = 2000;
+  const send = el("button", "primary", "Спросить");
+  const clear = button("Очистить", () => {
+    history = [];
+    thread.replaceChildren();
+    clear.hidden = true;
+  });
+  clear.hidden = true;
+
+  const row = el("div", "ask-row");
+  const actions = el("div", "footer-buttons");
+  actions.append(clear, send);
+  row.append(input, actions);
+  container.replaceChildren(el("h3", "", heading), scopeEl, thread, row);
+  container.classList.add("ask");
+
+  async function updateScope() {
+    const { notes, label } = await getScope();
+    scopeEl.textContent = notes.length ? label : "Нет записей для вопросов.";
+    send.disabled = !notes.length;
+  }
+
+  function sourcesBlock(sources, notesById) {
+    const wrap = el("div", "ask-sources");
+    wrap.append(el("span", "hint", "Источники: "));
+    for (const s of sources) {
+      const n = notesById.get(s.note_id);
+      if (!n) continue;
+      const label = (n.title || "Без названия") + (s.time ? ` · ${s.time}` : "");
+      wrap.append(button(label, () => LibraryView.open(n.id), "chip small"));
+    }
+    return wrap;
+  }
+
+  async function ask() {
+    const question = input.value.trim();
+    if (!question || send.disabled) return;
+    const { notes, label } = await getScope();
+    if (!notes.length) return;
+
+    const q = el("div", "ask-q");
+    q.append(el("div", "", question), el("div", "hint", label));
+    const a = el("div", "ask-a loading", "Думаю…");
+    thread.append(q, a);
+    clear.hidden = false;
+    input.value = "";
+    send.disabled = true;
+    a.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    try {
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, notes: notes.map(noteForAsk), history }),
+      });
+      if (needsLogin(res.status)) return;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Не удалось получить ответ.");
+
+      a.className = "ask-a";
+      a.replaceChildren(el("div", "ask-text", data.answer));
+      const notesById = new Map(notes.map((n) => [n.id, n]));
+      if (data.sources?.length) a.append(sourcesBlock(data.sources, notesById));
+      const withText = notes.filter((n) => n.paragraphs?.length || n.text).length;
+      if (data.notes_total === 1 && withText && !data.full_texts) {
+        a.append(el("div", "hint ask-limit",
+          "Запись очень длинная: ответ дан по конспекту, без полного текста."));
+      } else if (data.notes_used < data.notes_total || data.full_texts < Math.min(withText, data.notes_used)) {
+        a.append(el("div", "hint ask-limit",
+          `Учтено записей: ${data.notes_used} из ${data.notes_total}; полный текст — у ${data.full_texts}, ` +
+          "по остальным только конспект. Чтобы ответ был точнее, сузьте выбор темой или поиском."));
+      }
+      history.push({ question, answer: data.answer });
+      history = history.slice(-6);
+    } catch (err) {
+      a.className = "ask-a";
+      a.replaceChildren(el("p", "error", errorText(err)));
+    } finally {
+      send.disabled = false;
+      input.focus();
+    }
+  }
+
+  send.addEventListener("click", ask);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      ask();
+    }
+  });
+
+  return {
+    updateScope,
+    reset() {
+      history = [];
+      thread.replaceChildren();
+      clear.hidden = true;
+      updateScope();
+    },
+  };
+}

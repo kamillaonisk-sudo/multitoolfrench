@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 from app import auth  # noqa: E402
+from app.ask import GeminiAsker  # noqa: E402
 from app.errors import AppError  # noqa: E402
 from app.jobs import JobManager, transcript_text  # noqa: E402
 from app.pdf import summary_pdf, transcript_pdf  # noqa: E402
@@ -28,6 +29,7 @@ app = FastAPI(title="MultiTool French")
 _translator = GeminiTranslator()
 _jobs = JobManager(make_transcriber, _translator)
 _summarizer = GeminiSummarizer()
+_asker = GeminiAsker()
 
 
 def get_translator() -> GeminiTranslator:
@@ -40,6 +42,10 @@ def get_jobs() -> JobManager:
 
 def get_summarizer() -> GeminiSummarizer:
     return _summarizer
+
+
+def get_asker() -> GeminiAsker:
+    return _asker
 
 
 @app.exception_handler(AppError)
@@ -198,7 +204,7 @@ async def job_summary(
     return job.summary
 
 
-# ---------- PDF ----------
+# ---------- Вопросы по конспектам ----------
 
 class SummaryContent(BaseModel):
     title: str = ""
@@ -206,6 +212,48 @@ class SummaryContent(BaseModel):
     sections: list[dict] = Field(default_factory=list, max_length=100)
     takeaways: list[str] = Field(default_factory=list, max_length=50)
 
+
+
+class AskParagraph(BaseModel):
+    start: float = 0
+    original: str = Field(default="", max_length=20_000)
+
+
+class AskNote(BaseModel):
+    id: str = Field(max_length=200)
+    title: str = Field(default="", max_length=500)
+    topic: str = Field(default="", max_length=200)
+    created: str = Field(default="", max_length=50)
+    filename: str | None = Field(default=None, max_length=500)
+    summary: SummaryContent = Field(default_factory=lambda: SummaryContent())
+    paragraphs: list[AskParagraph] | None = Field(default=None, max_length=10_000)
+    text: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH * 2)
+
+
+class AskTurn(BaseModel):
+    question: str = Field(max_length=2000)
+    answer: str = Field(max_length=20_000)
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    notes: list[AskNote] = Field(max_length=500)
+    history: list[AskTurn] = Field(default_factory=list, max_length=20)
+
+
+@app.post("/api/ask")
+async def ask(req: AskRequest, asker=Depends(get_asker)):
+    question = req.question.strip()
+    if not question:
+        raise AppError("Напишите вопрос.", status_code=400)
+    return await asker.ask(
+        question,
+        [n.model_dump() for n in req.notes],
+        [t.model_dump() for t in req.history],
+    )
+
+
+# ---------- PDF ----------
 
 class SummaryPdfRequest(BaseModel):
     title: str = Field(default="Конспект", max_length=300)
